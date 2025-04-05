@@ -512,3 +512,4 @@ func Connections(identifier string, db *sql.DB) ([]EdgeData, error) {
 	fn := neighbors(SearchEdges, query)
 	return fn(db)
 }
+

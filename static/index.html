@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Vis.js Click Info Panel</title>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    body {
+      display: flex;
+      gap: 20px;
+      font-family: sans-serif;
+    }
+
+    #network {
+      width: 80%;
+      height: 800px;
+      border: 1px solid #ccc;
+    }
+
+    #infoBox {
+      width: 20%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      background: #f9f9f9;
+      height: 800px;
+      overflow-y: auto;
+    }
+
+    #infoBox h2 {
+      margin-top: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="network"></div>
+  <div id="infoBox">
+    <h2>Node Info</h2>
+    <p>Click a node to see details.</p>
+  </div>
+
+  <script>
+
+
+    fetchData()
+    function fetchData() {
+      fetch("http://localhost:8080/api/")
+        .then(res => res.json())
+        .then(data => {
+          loadGraph(data)
+        })
+        .catch(err => {
+          console.error("Error fetching nodes:", err);
+        });
+
+    }
+
+    function loadGraph(response) {
+      console.log(response)
+      let n = []
+      for (let i = 0; i < response.nodes.length; i++) {
+        var d = JSON.parse(response.nodes[i].body)
+        n.push({ id: response.nodes[i].id, label: d.name, data: d })
+      }
+      console.log("nodes:", n);
+      const nodes = new vis.DataSet(n)
+
+      let e = []
+      for (let i = 0; i < response.edges.length; i++) {
+        e.push({ from: response.edges[i].source, to: response.edges[i].target },)
+      }
+      console.log("edges:", e);
+      const edges = new vis.DataSet(e)
+
+      const container = document.getElementById("network");
+      const data = { nodes, edges };
+      const options = {
+        layout: {
+          hierarchical: {
+            enabled: true,
+            direction: 'LR',
+            sortMethod: 'directed',
+            nodeSpacing: 120,
+            levelSeparation: 150
+          }
+        },
+        physics: false,
+        interaction: { hover: true },
+        edges: { arrows: { to: true } },
+        nodes: {
+          shape: 'box',
+          font: { color: '#fff', size: 14 }
+        }
+      };
+      const network = new vis.Network(container, data, options);
+      const infoBox = document.getElementById('infoBox');
+      network.on('click', function (params) {
+        if (params.nodes.length > 0) {
+          const nodeId = params.nodes[0];
+          const node = nodes.get(nodeId);
+          infoBox.innerHTML = `
+          <h2>${node.label}</h2>
+          <p><b>ID:</b> ${node.id}</p>
+          ${node.data?.owner ? `<p><b>Owner:</b> ${node.data.owner}</p>` : ''}
+          ${node.data?.type ? `<p><b>Type:</b> ${node.data.type}</p>` : ''}
+          ${node.data?.desc ? `<p><b>Description:</b> ${node.data.desc}</p>` : ''}
+        `;
+        } else {
+          infoBox.innerHTML = `<h2>Node Info</h2><p>Click a node to see details.</p>`;
+        }
+      });
+
+    }
+
+  </script>
+</body>
+
+</html>
