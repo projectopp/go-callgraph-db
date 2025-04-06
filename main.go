@@ -25,9 +25,9 @@ func removeDB(dbPath string){
 
 func main() {
 
-	removeDB(".data/app.data")
-	removeDB(".data/app.data-shm")
-	removeDB(".data/app.data-wal")
+	// removeDB(".data/app.data")
+	// removeDB(".data/app.data-shm")
+	// removeDB(".data/app.data-wal")
 
 	db, err := sql.Open("sqlite3", "file:.data/app.data?_journal_mode=WAL&_foreign_keys=true&_busy_timeout=5000")
 	if err != nil {

@@ -87,7 +87,7 @@
         edges: {
           arrows: { to: true },
           smooth: {
-            type: "curvedCW", // or 'dynamic', 'discrete', etc.
+            type: "curvedCCW", // or 'dynamic', 'discrete', etc.
             roundness: 0.2
           }
         },
@@ -104,14 +104,14 @@
           const nodeId = params.nodes[0];
           const node = nodes.get(nodeId);
           infoBox.innerHTML = `
-          <h2>${node.label}</h2>
+          <h4>${node.label}</h4>
           <p><b>ID:</b> ${node.id}</p>
           ${node.data?.owner ? `<p><b>Owner:</b> ${node.data.owner}</p>` : ''}
           ${node.data?.type ? `<p><b>Type:</b> ${node.data.type}</p>` : ''}
           ${node.data?.desc ? `<p><b>Description:</b> ${node.data.desc}</p>` : ''}
         `;
         } else {
-          infoBox.innerHTML = `<h2>Node Info</h2><p>Click a node to see details.</p>`;
+          infoBox.innerHTML = `<h3>Node Info</h3><p>Click a node to see details.</p>`;
         }
       });
 
