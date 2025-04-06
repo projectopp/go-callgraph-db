@@ -54,23 +54,92 @@
         });
 
     }
+    const levelColors = [
+      '#2196F3', // Blue
+      '#4CAF50', // Green
+      '#9C27B0', // Purple
+      '#FFC107', // Amber
+      '#00BCD4', // Cyan
+      '#8BC34A', // Light Green
+      '#E91E63', // Pink
+      '#3F51B5', // Indigo
+      '#CDDC39', // Lime
+      '#FF9800', // Orange
+      '#009688', // Teal
+      '#FF5722', // Deep orange
+      '#673AB7', // Deep Purple
+      '#FFEB3B', // Yellow
+      '#F44336', // Red
+      '#03A9F4', // Light Blue
+      '#795548', // Brown
+      '#607D8B', // Blue Grey
+      '#A1887F', // Tan
+      '#BDBDBD'  // Grey
+    ];
 
     function loadGraph(response) {
-      console.log(response)
-      let n = []
+      let rawNodes = {};
       for (let i = 0; i < response.nodes.length; i++) {
-        var d = JSON.parse(response.nodes[i].body)
-        n.push({ id: response.nodes[i].id, label: d.name, data: d })
+        let node = response.nodes[i];
+        rawNodes[node.id] = JSON.parse(node.body);
       }
-      console.log("nodes:", n);
-      const nodes = new vis.DataSet(n)
 
-      let e = []
-      for (let i = 0; i < response.edges.length; i++) {
-        e.push({ from: response.edges[i].source, to: response.edges[i].target },)
+      // Build adjacency and reverse adjacency for level detection
+      let adjacency = {};
+      let inDegree = {};
+
+      for (let id in rawNodes) {
+        adjacency[id] = [];
+        inDegree[id] = 0;
       }
-      console.log("edges:", e);
-      const edges = new vis.DataSet(e)
+
+      for (let edge of response.edges) {
+        adjacency[edge.source].push(edge.target);
+        inDegree[edge.target]++;
+      }
+
+      // Find root nodes (no incoming edges)
+      let roots = Object.keys(inDegree).filter(id => inDegree[id] === 0);
+
+      // Assign levels via BFS
+      let levels = {};
+      let queue = [];
+
+      for (let root of roots) {
+        queue.push({ id: root, level: 0 });
+        levels[root] = 0;
+      }
+
+      while (queue.length > 0) {
+        let { id, level } = queue.shift();
+        for (let neighbor of adjacency[id]) {
+          if (!(neighbor in levels)) {
+            levels[neighbor] = level + 1;
+            queue.push({ id: neighbor, level: level + 1 });
+          }
+        }
+      }
+
+      // Assign color per level
+
+      let nodes = new vis.DataSet(
+        Object.entries(rawNodes).map(([id, data]) => {
+          let level = levels[id] || 0;
+          return {
+            id: id,
+            label: data.name,
+            data: data,
+            color: levelColors[level % levelColors.length]
+          };
+        })
+      );
+
+      let edges = new vis.DataSet(
+        response.edges.map(edge => ({
+          from: edge.source,
+          to: edge.target
+        }))
+      );
 
       const container = document.getElementById("network");
       const data = { nodes, edges };
@@ -87,7 +156,7 @@
         edges: {
           arrows: { to: true },
           smooth: {
-            type: "curvedCCW", // or 'dynamic', 'discrete', etc.
+            type: "curvedCCW",
             roundness: 0.2
           }
         },
@@ -98,23 +167,23 @@
         interaction: { hover: true }
       };
       const network = new vis.Network(container, data, options);
+
       const infoBox = document.getElementById('infoBox');
       network.on('click', function (params) {
         if (params.nodes.length > 0) {
           const nodeId = params.nodes[0];
           const node = nodes.get(nodeId);
           infoBox.innerHTML = `
-          <h4>${node.label}</h4>
-          <p><b>ID:</b> ${node.id}</p>
-          ${node.data?.owner ? `<p><b>Owner:</b> ${node.data.owner}</p>` : ''}
-          ${node.data?.type ? `<p><b>Type:</b> ${node.data.type}</p>` : ''}
-          ${node.data?.desc ? `<p><b>Description:</b> ${node.data.desc}</p>` : ''}
-        `;
+        <h4>${node.label}</h4>
+        <p><b>ID:</b> ${node.id}</p>
+        ${node.data?.owner ? `<p><b>Owner:</b> ${node.data.owner}</p>` : ''}
+        ${node.data?.type ? `<p><b>Type:</b> ${node.data.type}</p>` : ''}
+        ${node.data?.desc ? `<p><b>Description:</b> ${node.data.desc}</p>` : ''}
+      `;
         } else {
           infoBox.innerHTML = `<h3>Node Info</h3><p>Click a node to see details.</p>`;
         }
       });
-
     }
 
   </script>
