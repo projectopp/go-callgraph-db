@@ -2,11 +2,12 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"go-callgraph-db/sqlitegraph"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,7 +15,19 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+func removeDB(dbPath string){
+ 	_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		slog.Error("failed to delete old database file", slog.Any("error", err))
+		return
+	}
+}
+
 func main() {
+
+	removeDB(".data/app.data")
+	removeDB(".data/app.data-shm")
+	removeDB(".data/app.data-wal")
 
 	db, err := sql.Open("sqlite3", "file:.data/app.data?_journal_mode=WAL&_foreign_keys=true&_busy_timeout=5000")
 	if err != nil {
@@ -41,12 +54,20 @@ func main() {
 		slog.Error("failed to analyse", "error", err)
 		return
 	}
-	filterPacks := map[string]struct{}{
-		"main":        struct{}{},
-		"sqlitegraph": struct{}{},
-	}
-	//2. create graphs
-	traverseOut(db, a.callgraph.Root.Out, filterPacks)
+	allowedPacks := make(map[string]bool)
+	allowedPacks["go-callgraph-db"] = true
+	allowedPacks["go-callgraph-db/sqlitegraph"] = true
+
+	ignorePacks := make(map[string]bool)
+	ignorePacks["log/slog"] = true
+	ignorePacks["database/sql"] = true
+	visited := make(map[string]bool)
+	traverseOut(db, a.callgraph.Root.Out, allowedPacks, ignorePacks, visited)
+	slog.Info("finsihed traversing")
+
+	fib(3)
+	even(4)
+	odd(3)
 
 	http.HandleFunc("/api/", RouteHandler(db))
 	http.Handle("/", http.FileServer(http.Dir("./static")))
@@ -54,92 +75,102 @@ func main() {
 
 }
 
-type GNode struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
+func fib(n int) int {
+	if n <= 1 {
+		return n
+	}
+	return fib(n-1) + fib(n-2)
 }
 
-func traverseOut(db *sql.DB, out []*callgraph.Edge, filterPacks map[string]struct{}) {
+func even(n int) bool {
+ 	if n == 0 {
+		return true
+	}
+	return odd(n - 1)
+}
+
+func odd(n int) bool {
+ 	if n == 0 {
+		return false
+	}
+	return even(n - 1)
+}
+
+
+func traverseOut(db *sql.DB, out []*callgraph.Edge, allowedPacks, ignorePacks, visited map[string]bool) {
 	for _, item := range out {
-		if item == nil {
-			return
-		}
-		if item.Caller == nil {
-			return
-		}
-		if item.Caller.Func.Pkg == nil {
-			return
-		}
-		if _, exists := filterPacks[item.Caller.Func.Pkg.Pkg.Name()]; !exists {
-			return
-		}
-		callerNode := GNode{ID: FuncIDFromSSA(item.Caller.Func), Name: item.Caller.Func.Name(), Type: "func"}
-		b1, _ := json.Marshal(&callerNode)
-		if _, err := sqlitegraph.AddNode(callerNode.ID, b1, db); err != nil && err.Error() != "UNIQUE constraint failed: nodes.id" {
+		callerNodeBody := sqlitegraph.NodeBody{ID: FuncID(item.Caller.Func), Name: item.Caller.Func.Name(), Type: "func"}
+		if err := sqlitegraph.AddNode(callerNodeBody, db); err != nil && err.Error() != "UNIQUE constraint failed: nodes.id" {
 			slog.Error("error adding node", "error", err)
 		}
-		if item.Callee == nil {
-			return
+
+		var calleePkgName string
+		if item.Callee.Func.Pkg != nil && item.Callee.Func.Pkg.Pkg != nil {
+			calleePkgName = item.Callee.Func.Pkg.Pkg.Path()
+		} else if item.Callee.Func.Parent() != nil {
+			parent := item.Callee.Func.Parent()
+			if parent.Pkg != nil && parent.Pkg.Pkg != nil {
+				calleePkgName = parent.Pkg.Pkg.Path()
+			}
 		}
-		if item.Callee.Func.Pkg == nil {
-			return
+
+		_, allowed := allowedPacks[calleePkgName]
+		_, ingore := ignorePacks[calleePkgName]
+		if !allowed || ingore {
+			continue
 		}
-		// slog.Info(item.Callee.Func.Pkg.Pkg.Name())
-		// if _, exists := filterPacks[item.Callee.Func.Pkg.Pkg.Name()]; !exists {
-		// 	return
-		// }
-		calleeNode := GNode{ID: FuncIDFromSSA(item.Callee.Func), Name: item.Callee.Func.Name(), Type: "func"}
-		// if strings.Contains(calleeNode.ID, "go/types.(Basic)") ||
-		// 	strings.Contains(calleeNode.ID, "tool") ||
-		// 	strings.Contains(calleeNode.ID, "slog") ||
-		// 	strings.Contains(calleeNode.ID, "strings.") ||
-		// 	strings.Contains(calleeNode.ID, "go/types") {
-		// 	return
-		// }
-		b2, _ := json.Marshal(&calleeNode)
-		if _, err := sqlitegraph.AddNode(calleeNode.ID, b2, db); err != nil && err.Error() != "UNIQUE constraint failed: nodes.id" {
+
+		callerID := FuncID(item.Caller.Func)
+		calleeID := FuncID(item.Callee.Func)
+		edgeKey := fmt.Sprintf("%s->%s", callerID, calleeID)
+		v, exists := visited[edgeKey]
+		if exists {
+			if v {
+				continue
+			} else {
+				visited[edgeKey] = true
+			}
+		} else {
+			visited[edgeKey] = false
+		}
+
+
+		calleeNodeBody := sqlitegraph.NodeBody{ID: FuncID(item.Callee.Func), Name: item.Callee.Func.Name(), Type: "func"}
+		if err := sqlitegraph.AddNode(calleeNodeBody, db); err != nil && err.Error() != "UNIQUE constraint failed: nodes.id" {
 			slog.Error("error adding node", "error", err)
 		}
-		if _, err := sqlitegraph.ConnectNodes(callerNode.ID, calleeNode.ID, db); err != nil {
+
+		if err := sqlitegraph.AddEdge(sqlitegraph.Edge{Source: callerNodeBody.ID, Target: calleeNodeBody.ID}, db); err != nil {
 			slog.Error("error adding edge", "error", err)
 		}
-		slog.Info(fmt.Sprintf("funtion %s calls function %s:", callerNode.ID, calleeNode.ID))
-		traverseOut(db, item.Callee.Out, filterPacks)
+
+		traverseOut(db, item.Callee.Out, allowedPacks, ignorePacks, visited)
 	}
 }
 
-func FuncIDFromSSA(fn *ssa.Function) string {
+func FuncID(fn *ssa.Function) string {
 	if fn == nil {
-		return "<nil-func>"
+		return ""
 	}
-
-	pkgPath := ""
+	var pkgPath string
 	if fn.Pkg != nil && fn.Pkg.Pkg != nil {
 		pkgPath = fn.Pkg.Pkg.Path()
 	} else if fn.Parent() != nil {
-		// Nested function: use parent's package
 		parent := fn.Parent()
 		if parent.Pkg != nil && parent.Pkg.Pkg != nil {
 			pkgPath = parent.Pkg.Pkg.Path()
 		}
 	}
-
 	name := fn.Name()
-
-	// Strip synthetic suffix like $1, $2, etc.
 	if idx := strings.Index(name, "$"); idx != -1 {
 		name = name[:idx]
 	}
-
-	// Check for method: has a receiver
 	if fn.Signature.Recv() != nil {
 		recv := fn.Signature.Recv().Type().String()
 		if idx := strings.LastIndex(recv, "."); idx != -1 {
 			recv = recv[idx+1:]
 		}
-		return fmt.Sprintf("%s.(%s).%s", pkgPath, recv, name)
+		return fmt.Sprintf("%s.%s.%s", pkgPath, recv, name)
 	}
-
-	return fmt.Sprintf("%s.%s", pkgPath, name)
+	return fmt.Sprintf("%s.standalone.%s", pkgPath, name)
 }

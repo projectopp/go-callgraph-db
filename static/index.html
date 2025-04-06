@@ -84,13 +84,18 @@
             levelSeparation: 150
           }
         },
-        physics: false,
-        interaction: { hover: true },
-        edges: { arrows: { to: true } },
+        edges: {
+          arrows: { to: true },
+          smooth: {
+            type: "curvedCW", // or 'dynamic', 'discrete', etc.
+            roundness: 0.2
+          }
+        },
         nodes: {
           shape: 'box',
           font: { color: '#fff', size: 14 }
-        }
+        },
+        interaction: { hover: true }
       };
       const network = new vis.Network(container, data, options);
       const infoBox = document.getElementById('infoBox');
