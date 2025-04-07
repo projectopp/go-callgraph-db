@@ -16,7 +16,7 @@ import (
 )
 
 func removeDB(dbPath string){
- 	_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
 	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
 		slog.Error("failed to delete old database file", slog.Any("error", err))
 		return
@@ -25,9 +25,9 @@ func removeDB(dbPath string){
 
 func main() {
 
-	// removeDB(".data/app.data")
-	// removeDB(".data/app.data-shm")
-	// removeDB(".data/app.data-wal")
+	removeDB(".data/app.data")
+	removeDB(".data/app.data-shm")
+	removeDB(".data/app.data-wal")
 
 	db, err := sql.Open("sqlite3", "file:.data/app.data?_journal_mode=WAL&_foreign_keys=true&_busy_timeout=5000")
 	if err != nil {
@@ -61,9 +61,9 @@ func main() {
 	ignorePacks := make(map[string]bool)
 	ignorePacks["log/slog"] = true
 	ignorePacks["database/sql"] = true
-	visited := make(map[string]bool)
-	traverseOut(db, a.callgraph.Root.Out, allowedPacks, ignorePacks, visited)
-	slog.Info("finsihed traversing")
+ 	visited := make(map[string]bool)
+ 	traverseOut(db, a.callgraph.Root.Out, allowedPacks, ignorePacks, visited)
+	slog.Info("finished analysis")
 
 	fib(3)
 	even(4)
@@ -74,28 +74,6 @@ func main() {
 	http.ListenAndServe(":8080", nil)
 
 }
-
-func fib(n int) int {
-	if n <= 1 {
-		return n
-	}
-	return fib(n-1) + fib(n-2)
-}
-
-func even(n int) bool {
- 	if n == 0 {
-		return true
-	}
-	return odd(n - 1)
-}
-
-func odd(n int) bool {
- 	if n == 0 {
-		return false
-	}
-	return even(n - 1)
-}
-
 
 func traverseOut(db *sql.DB, out []*callgraph.Edge, allowedPacks, ignorePacks, visited map[string]bool) {
 	for _, item := range out {
@@ -114,10 +92,28 @@ func traverseOut(db *sql.DB, out []*callgraph.Edge, allowedPacks, ignorePacks, v
 			}
 		}
 
-		_, allowed := allowedPacks[calleePkgName]
-		_, ingore := ignorePacks[calleePkgName]
-		if !allowed || ingore {
-			continue
+		if _, ignore := ignorePacks[calleePkgName]; ignore {
+			for k := range ignorePacks {
+				if strings.HasPrefix(calleePkgName, k) {
+					ignore = true
+					break
+				}
+			}
+			if ignore {
+				continue
+			}
+ 		}
+
+		if _, allowed := allowedPacks[calleePkgName]; !allowed {
+			for k := range allowedPacks {
+				if strings.HasPrefix(calleePkgName, k) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
 		}
 
 		callerID := FuncID(item.Caller.Func)
@@ -133,7 +129,6 @@ func traverseOut(db *sql.DB, out []*callgraph.Edge, allowedPacks, ignorePacks, v
 		} else {
 			visited[edgeKey] = false
 		}
-
 
 		calleeNodeBody := sqlitegraph.NodeBody{ID: FuncID(item.Callee.Func), Name: item.Callee.Func.Name(), Type: "func"}
 		if err := sqlitegraph.AddNode(calleeNodeBody, db); err != nil && err.Error() != "UNIQUE constraint failed: nodes.id" {
@@ -173,4 +168,25 @@ func FuncID(fn *ssa.Function) string {
 		return fmt.Sprintf("%s.%s.%s", pkgPath, recv, name)
 	}
 	return fmt.Sprintf("%s.standalone.%s", pkgPath, name)
+}
+
+func fib(n int) int {
+	if n <= 1 {
+		return n
+	}
+	return fib(n-1) + fib(n-2)
+}
+
+func even(n int) bool {
+	if n == 0 {
+		return true
+	}
+	return odd(n - 1)
+}
+
+func odd(n int) bool {
+	if n == 0 {
+		return false
+	}
+	return even(n - 1)
 }
